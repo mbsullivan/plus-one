@@ -77,13 +77,12 @@ int main(int argc, char *argv[]){
       string ext = fs::extension(dir_itr->leaf());
       if(file_format->compare(ext) == 0){
         if(verbose){
-          //cout << "    * " << "Processing " << dir_itr->leaf() << "...";
+          cout << "    * " << "Processing " << dir_itr->leaf() << "...";
         }
 
         // parse file (for later processing)
 	fs::path target_file(full_path);
         target_file /= dir_itr->leaf();
-cout << "    * " << "Processing " << target_file << "...";
         //bool added = flows->add(fs::system_complete(fs::path(dir_itr->leaf(), fs::native)).native_directory_string());
         bool added = flows->add(target_file.native_directory_string());
 	

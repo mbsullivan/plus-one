@@ -13,6 +13,7 @@
  */
 
 #include "calc_flows.h" 	// calc_flows header file
+#include "img_template.tpl"	// provides efficient access to pixels
 
 // Constructors
 
@@ -28,10 +29,10 @@ Calc_Flows::~Calc_Flows(){
     cvReleaseImage(&orig_images[i]);
   }
   for(int j = 0; j < orig_images.size(); j++){
-    cvReleaseImage(&velocity_x[j]);
+    cvReleaseImage(&velocity_mag[j]);
   }
   for(int k = 0; k < orig_images.size(); k++){
-    cvReleaseImage(&velocity_y[k]);
+    cvReleaseImage(&velocity_angle[k]);
   }
 }
 
@@ -47,7 +48,7 @@ bool Calc_Flows::add(string filename){
   
   // load the image
   IplImage *img = NULL;
-  img = cvLoadImage(filename.c_str(),BOOL_COLOR_IMG);
+  img = cvLoadImage(filename.c_str(),0);  // scan in grayscale
   if(!img) return false;
 
   // store the image
@@ -88,34 +89,54 @@ int Calc_Flows::run(bool verbose){
     channels2  = img2->nChannels;
  
     // check for inequality in image dimensions, channels
-    if(height1 != height2 || width1 != width2 || channels1 != channels2){
+    if(!img1 || !img2 || height1 != height2 || width1 != width2 || channels1 != channels2){
       printf("[ERROR] Images are not same dimensions, number of channels!");
       return IMAGE_CONSISTENCY_FAILED;
     }
 
     // calculate flow
-    IplImage *gray1 = NULL, *gray2 = NULL;	// used to store grayscale image information
     IplImage *lkvelX = NULL, *lkvelY = NULL; 	// used to store flow velocities (Lucas & Kanade)
 
-    // convert images to 8-bit, single channel
-    gray1 = cvCreateImage(cvGetSize(img1), IPL_DEPTH_8U, BOOL_COLOR_IMG);
-    gray2 = cvCreateImage(cvGetSize(img2), IPL_DEPTH_8U, BOOL_COLOR_IMG);
-    cvCvtColor(img1, gray1, CV_BGR2GRAY);	 // convert img1 to color space of gray1
-    cvCvtColor(img2, gray2, CV_BGR2GRAY);  // convert img2 to color space of gray2
-
     // create images to store velocities in X and Y directions
-    lkvelX = cvCreateImage(cvGetSize(img1), IPL_DEPTH_32F, BOOL_COLOR_IMG);
-    lkvelY = cvCreateImage(cvGetSize(img2), IPL_DEPTH_32F, BOOL_COLOR_IMG);
+    lkvelX = cvCreateImage(cvGetSize(img1), IPL_DEPTH_32F, 1);
+    lkvelY = cvCreateImage(cvGetSize(img2), IPL_DEPTH_32F, 1);
 
     if(verbose)
       cout << "    * " << "Processing optical flow of image pair #" << i << "...";
 
     // calculate flow (Lucas & Kanade algorithm)
-    cvCalcOpticalFlowLK(gray1, gray2, cvSize(3, 3), lkvelX, lkvelY); 
+    cvCalcOpticalFlowLK(img1, img2, cvSize(3, 3), lkvelX, lkvelY); 
+
+    // create magnitude/angle image maps for velocities 
+    IplImage *mag = NULL, *ang = NULL;	// holds magnitude, angle of each flow vector
+    mag = cvCreateImage(cvGetSize(img1), IPL_DEPTH_32F, 1);
+    ang = cvCreateImage(cvGetSize(img1), IPL_DEPTH_32F, 1);
+    cvCartToPolar(lkvelX, lkvelY, mag, ang);
+
+    // find edges of original image
+    IplImage *mag_edges = NULL;
+    mag_edges = cvCreateImage(cvGetSize(img1), IPL_DEPTH_8U, 1);
+    cvCanny(img1, mag_edges, 3, 6, 3);  
+
+    // display edge magnitude data
+    cvNamedWindow("edges", CV_WINDOW_AUTOSIZE); 
+    cvShowImage("edges", mag_edges);
+    cvNamedWindow("magnitudes", CV_WINDOW_AUTOSIZE); 
+    cvShowImage("magnitudes", mag);
+    cvWaitKey(0);
+    cvDestroyAllWindows();
 
     // store flow
-    velocity_x.push_back(lkvelX);
-    velocity_y.push_back(lkvelY);
+    velocity_mag.push_back(mag);
+    velocity_angle.push_back(ang);
+
+    // release the images
+    cvReleaseImage(&lkvelX);
+    cvReleaseImage(&lkvelY);
+    cvReleaseImage(&mag);
+    cvReleaseImage(&ang);
+    cvReleaseImage(&mag_edges);
+    // Note: img1 and img2 data will be released by deconstructor
 
     if(verbose)
       cout << "\t\t\t\t[OK]" << endl;

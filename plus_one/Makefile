@@ -38,7 +38,7 @@ plus_one.o: plus_one.cxx plus_one.h
 	$(CC) -c $(DFLAGS) $(OPENCVI) plus_one.cxx
 
 # compile flow component of program
-calc_flows.o: calc_flows.cxx calc_flows.h
+calc_flows.o: calc_flows.cxx calc_flows.h img_template.tpl
 	$(CC) -c $(DFLAGS) $(OPENCVI) calc_flows.cxx
 
 # clean products of compile and build

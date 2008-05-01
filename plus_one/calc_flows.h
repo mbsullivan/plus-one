@@ -30,7 +30,6 @@
 using namespace std;
 
 // constants
-const int BOOL_COLOR_IMG = 1;		// using colored images
 const bool DEFAULT_VERBOSITY = true;	// assume verbose
 
 // error codes
@@ -52,7 +51,7 @@ public:
     
 private:
   // Data representation objects
-  vector<IplImage*> orig_images, velocity_x, velocity_y;
+  vector<IplImage*> orig_images, velocity_mag, velocity_angle;
 
   // State of machine
   bool ran;				// whether differences have been calculated
