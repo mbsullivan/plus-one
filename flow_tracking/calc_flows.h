@@ -33,7 +33,8 @@ using namespace std;
 
 // constants
 const bool DEFAULT_VERBOSITY = true;	// assume verbose
-//# define M_PI 3.14159265358979323846 	// pi (from math.h)
+const int MAX_POINTS_TO_TRACK = 500;	// maximum number of points to track
+const int SIZE_OF_CORNER_NEIGHBORHOOD = 10;	// size of neighborhood about a pixel to determine corners
 
 // error codes
 #define IMAGE_CONSISTENCY_FAILED -1
@@ -63,6 +64,12 @@ private:
 
   // State of machine
   bool ran;				// whether differences have been calculated
+  char* machine_status;
+  int num_tracked_points;
+  int flags;
+
+  // Points to track
+  CvPoint2D32f* points[2], *swap_points;
 };
 
 

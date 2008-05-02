@@ -58,6 +58,8 @@ int main(int argc, char *argv[])
     exit(FIRST_IMAGE_ERROR);
   }
 
+  cvSaveImage("a.png",img1);      // add the frame to a file
+
   // load the second image  
   img2=cvLoadImage(argv[2],BOOL_COLOR_IMG);
   if(!img2){

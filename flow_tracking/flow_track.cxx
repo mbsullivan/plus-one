@@ -1,5 +1,5 @@
 /*
- * plus_one.cxx - Executable Image Flow Analysis Application
+ * flow_track.cxx - Executable Image Flow Analysis Application
  * (c) 2008 Michael Sullivan
  *
  * Version 1.0.1
@@ -22,7 +22,7 @@
  *
  */
 
-#include "plus_one.h"	// program header
+#include "flow_track.h"	// program header
 #include "calc_flows.h" // performs optical flow operations
 
 int main(int argc, char *argv[]){
@@ -30,7 +30,7 @@ int main(int argc, char *argv[]){
   int optchar;							// for option input
 
   // handle input flags
-  while((optchar = getopt(argc, argv, "i:f:s?")) != -1){	// read in arguments
+  while((optchar = getopt(argc, argv, "i:f:s?o:")) != -1){	// read in arguments
     switch(optchar){
       case 'i':			// input directory
         input_directory = new string(optarg);
@@ -41,6 +41,9 @@ int main(int argc, char *argv[]){
         break;
       case 's':                 // verbosity
         verbose = false;
+        break;
+      case 'o':
+        output_directory = new string(optarg);
         break;
       default:                  // display syntax help
       case '?':
@@ -99,7 +102,7 @@ int main(int argc, char *argv[]){
 
   // find optical flow for each pair of images
   flows->run();
-  flows->animate();
+  //flows->animate();
 
   return 0;
 }
