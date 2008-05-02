@@ -99,6 +99,7 @@ int main(int argc, char *argv[]){
 
   // find optical flow for each pair of images
   flows->run();
+  flows->animate();
 
   return 0;
 }

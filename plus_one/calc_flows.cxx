@@ -28,12 +28,6 @@ Calc_Flows::~Calc_Flows(){
   for(int i = 0; i < orig_images.size(); i++){
     cvReleaseImage(&orig_images[i]);
   }
-  for(int j = 0; j < orig_images.size(); j++){
-    cvReleaseImage(&velocity_mag[j]);
-  }
-  for(int k = 0; k < orig_images.size(); k++){
-    cvReleaseImage(&velocity_angle[k]);
-  }
 }
 
 // Access Functions
@@ -71,8 +65,10 @@ int Calc_Flows::run(bool verbose){
     
     // load images
     IplImage *img1 = NULL, *img2 = NULL;
-    img1 = orig_images[i];
-    img2 = orig_images[i+1];
+    //img1 = orig_images[i];
+    //img2 = orig_images[i+1];
+    img1 = cvCloneImage(orig_images[i]);
+    img2 = cvCloneImage(orig_images[i+1]);
     
     // check that images are consistent
     int height1,width1,channels1;			
@@ -114,29 +110,61 @@ int Calc_Flows::run(bool verbose){
     cvCartToPolar(lkvelX, lkvelY, mag, ang);
 
     // find edges of original image
-    IplImage *mag_edges = NULL;
-    mag_edges = cvCreateImage(cvGetSize(img1), IPL_DEPTH_8U, 1);
-    cvCanny(img1, mag_edges, 3, 6, 3);  
+    //IplImage *mag_edges = NULL;
+    //mag_edges = cvCreateImage(cvGetSize(img1), IPL_DEPTH_8U, 1);
+    //cvCanny(img1, mag_edges, 3, 6, 3);  
+
+    // count angles
+    int left = 0, right = 0;
+    double sum_left_col = 0, sum_right_col = 0, ave_left_col = 0, ave_right_col = 0;
+    BwImageFloat angles(ang);
+    for(int r = 0; r < ang->height; r++){
+      for(int c = 0; c < ang->width; c++){
+        if(angles[r][c] > M_PI){	
+          left++;			// count leftward angles
+          sum_left_col += c;		// record leftward positions
+          //sum_sq_left_col += c*c;	// used for sample standard deviation
+        }
+        else{
+          right++;			// count rightward angles
+          sum_right_col += c;		// record rightward positions
+          //sum_sq_right_col += c*c;	// used for sample standard deviation
+        }
+      }
+    }
+    ave_left_col = sum_left_col / (ang->height*ang->width);		// average leftward column
+    ave_right_col = sum_right_col / (ang->height*ang->width);		// average rightward column
+
+    if(left < right && ave_left_col < ave_right_col){
+      directions.push_back(FORWARD);
+      //cout << "FORWARD" << endl;
+    }
+    else if(left > right && ave_left_col > ave_right_col){
+      directions.push_back(BACKWARD);
+      //cout << "BACKWARD" << endl;
+    }
+    else{
+      directions.push_back(UNDETERMINED);
+    }
 
     // display edge magnitude data
-    cvNamedWindow("edges", CV_WINDOW_AUTOSIZE); 
-    cvShowImage("edges", mag_edges);
-    cvNamedWindow("magnitudes", CV_WINDOW_AUTOSIZE); 
-    cvShowImage("magnitudes", mag);
-    cvWaitKey(0);
-    cvDestroyAllWindows();
-
-    // store flow
-    velocity_mag.push_back(mag);
-    velocity_angle.push_back(ang);
+    //cvNamedWindow("edges", CV_WINDOW_AUTOSIZE); 
+    //cvShowImage("edges", mag_edges);
+    //cvNamedWindow("magnitudes", CV_WINDOW_AUTOSIZE); 
+    //cvShowImage("magnitudes", mag);
+    //cvNamedWindow("img", CV_WINDOW_AUTOSIZE); 
+    //cvShowImage("img", img2);
+    //cvWaitKey(0);
+    //cvDestroyAllWindows();
 
     // release the images
     cvReleaseImage(&lkvelX);
     cvReleaseImage(&lkvelY);
     cvReleaseImage(&mag);
     cvReleaseImage(&ang);
-    cvReleaseImage(&mag_edges);
-    // Note: img1 and img2 data will be released by deconstructor
+    cvReleaseImage(&img1);
+    cvReleaseImage(&img2);
+    //cvReleaseImage(&mag_edges);
 
     if(verbose)
       cout << "\t\t\t\t[OK]" << endl;
@@ -145,3 +173,52 @@ int Calc_Flows::run(bool verbose){
   return 0;
 }
 
+void Calc_Flows::animate(){
+
+  direction prev_direction = UNDETERMINED;
+
+  for(int i = 0; i < orig_images.size() - 1; i++){
+    
+    // load image
+    IplImage *img = NULL;
+    //img = orig_images[i+1];
+    img = cvCloneImage(orig_images[i+1]);
+
+    // add text
+    CvFont font;
+    double hScale=1.0;
+    double vScale=1.0;
+    int    lineWidth=1;
+    cvInitFont(&font,CV_FONT_HERSHEY_TRIPLEX, hScale,vScale,0,lineWidth);
+    
+    if(directions[i] == FORWARD)
+      cvPutText (img,"FORWARD",cvPoint(200,420), &font, cvScalar(255,255,0));
+    else if(directions[i] == BACKWARD)
+      cvPutText (img,"BACKWARD",cvPoint(200,420), &font, cvScalar(255,255,0));
+    else if(directions[i] == UNDETERMINED){
+      if(prev_direction == FORWARD)
+        cvPutText (img,"FORWARD",cvPoint(200,420), &font, cvScalar(255,255,0));
+      else if(prev_direction == BACKWARD)
+        cvPutText (img,"BACKWARD",cvPoint(200,420), &font, cvScalar(255,255,0));
+      else
+        cvPutText (img,"UNDETERMINED",cvPoint(200,420), &font, cvScalar(255,255,0));
+    }
+
+    prev_direction = directions[i];
+
+    // output images
+    //char* outfile;
+    //if(i < 10) sprintf(outfile, "out/00%d.png", i);
+    //else if(i < 100)  sprintf(outfile, "out/0%d.png", i);
+    //else sprintf(outfile, "out/%d.png", i);
+    stringstream ostream;
+    string outfile;
+    ostream << i << ".png";
+    outfile = ostream.str();
+    if(i < 10) outfile = "0" + outfile;
+    if(i < 100) outfile = "0" + outfile;
+    outfile = "out/" + outfile;
+
+    cvSaveImage(outfile.c_str(),img);      // add the frame to a file   
+  }
+}

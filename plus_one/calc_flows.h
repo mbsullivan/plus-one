@@ -24,16 +24,22 @@
 #include "highgui.h"
 #include <iostream>
 #include <string>
+#include <sstream>
 #include <vector>
+#include <math.h>
 
 // namespace preparation
 using namespace std;
 
 // constants
 const bool DEFAULT_VERBOSITY = true;	// assume verbose
+//# define M_PI 3.14159265358979323846 	// pi (from math.h)
 
 // error codes
 #define IMAGE_CONSISTENCY_FAILED -1
+
+// types
+enum direction { FORWARD, BACKWARD, UNDETERMINED };
 
 class Calc_Flows{
 public:
@@ -47,11 +53,13 @@ public:
   // Action Functions
   bool add(string filename);		// add an image
   int run();				// assumes DEFAULT_VERBOSITY
-  int run(bool verbose);		// find differences
+  int run(bool verbose);		// find optical flow
+  void animate();			// output a movie of the results
     
 private:
   // Data representation objects
-  vector<IplImage*> orig_images, velocity_mag, velocity_angle;
+  vector<IplImage*> orig_images;
+  vector<direction> directions;
 
   // State of machine
   bool ran;				// whether differences have been calculated
