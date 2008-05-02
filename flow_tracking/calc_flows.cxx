@@ -19,7 +19,15 @@
 
 Calc_Flows::Calc_Flows(){
 // Default Constructor
-  ran = false;
+
+  // set up state of machine
+  ran = false;  
+  machine_status = 0;
+  num_tracked_points = 0;
+  flags = 0;
+  // Points to track
+  points[0] = 0;
+  points[1] = 0;
 }
 
 Calc_Flows::~Calc_Flows(){
@@ -65,13 +73,47 @@ int Calc_Flows::run(bool verbose){
 
   if(verbose)
     cout << endl << "  * " << "Calculating optical flow for " << orig_images.size() - 1 << " pairs of images..." << endl;
-  
+
+  // set up state of machine for new run
+  points[0] = (CvPoint2D32f*)cvAlloc(MAX_POINTS_TO_TRACK*sizeof(points[0][0]));
+  points[1] = (CvPoint2D32f*)cvAlloc(MAX_POINTS_TO_TRACK*sizeof(points[0][0]));
+  machine_status = (char*)cvAlloc(MAX_POINTS_TO_TRACK);
+  flags = 0;
+
+  // used to store (grayscale) input images
+  IplImage *img1 = NULL, *img2 = NULL, *disp_image = NULL;
+
+  // initialize for first frame
+  img1 = cvCloneImage(orig_images[0]);
+  // used for feature detection
+  IplImage* eig = cvCreateImage(cvGetSize(img1), 32, 1);
+  IplImage* temp = cvCreateImage(cvGetSize(img1), 32, 1);
+  double quality = 0.01;
+  double min_distance = 10;
+  num_tracked_points = MAX_POINTS_TO_TRACK;
+  // detect number of features to track
+  cvGoodFeaturesToTrack(img1, eig, temp, points[1], &num_tracked_points, quality, min_distance, 0, 3, 0, 0.04 );
+  cvFindCornerSubPix(img1, points[1], num_tracked_points, cvSize(SIZE_OF_CORNER_NEIGHBORHOOD,SIZE_OF_CORNER_NEIGHBORHOOD), cvSize(-1,-1), cvTermCriteria(CV_TERMCRIT_ITER|CV_TERMCRIT_EPS,20,0.03));
+  // release temporary images
+  cvReleaseImage(&eig);
+  cvReleaseImage(&temp);
+
+  // write circles to image
+  disp_image = cvCloneImage(img1);
+  for(int i = 0; i < num_tracked_points; i++){
+    cvCircle(disp_image, cvPointFrom32f(points[1][i]), 3, CV_RGB(0,255,0), -1, 8,0);
+  }
+
+  // display image
+  cvNamedWindow("disp_image", CV_WINDOW_AUTOSIZE); 
+  cvShowImage("disp_image", disp_image);
+  cvWaitKey(0);
+  cvDestroyAllWindows();
+  return 0;  
+
   for(int i = 0; i < orig_images.size() - 1; i++){
     
     // load images
-    IplImage *img1 = NULL, *img2 = NULL;
-    //img1 = orig_images[i];
-    //img2 = orig_images[i+1];
     img1 = cvCloneImage(orig_images[i]);
     img2 = cvCloneImage(orig_images[i+1]);
     
@@ -174,7 +216,7 @@ int Calc_Flows::run(bool verbose){
     if(verbose)
       cout << "\t\t\t\t[OK]" << endl;
   }
- 
+
   // mark as run
   ran = true;
 
@@ -220,10 +262,6 @@ void Calc_Flows::animate(){
     prev_direction = directions[i];
 
     // output images
-    //char* outfile;
-    //if(i < 10) sprintf(outfile, "out/00%d.png", i);
-    //else if(i < 100)  sprintf(outfile, "out/0%d.png", i);
-    //else sprintf(outfile, "out/%d.png", i);
     stringstream ostream;
     string outfile;
     ostream << i << ".png";
