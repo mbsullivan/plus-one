@@ -34,7 +34,7 @@ using namespace std;
 // constants
 const bool DEFAULT_VERBOSITY = true;	// assume verbose
 const int MAX_POINTS_TO_TRACK = 500;	// maximum number of points to track
-const int SIZE_OF_CORNER_NEIGHBORHOOD = 10;	// size of neighborhood about a pixel to determine corners
+const int WINDOW_SIZE = 10;	// size of neighborhood about a pixel to determine corners
 
 // error codes
 #define IMAGE_CONSISTENCY_FAILED -1
@@ -52,24 +52,35 @@ public:
   int get_size();		// returns number of processed images
     
   // Action Functions
-  bool add(string filename);		// add an image
+  bool add(string);			// add an image
   int run();				// assumes DEFAULT_VERBOSITY
-  int run(bool verbose);		// find optical flow
-  void animate();			// output a movie of the results
+  int run(bool);			// find optical flow
+  void animate(string);			// assumes DEFAULT_VERBOSITY
+  void animate(string, bool);		// output a movie of the results
+  int run_webcam(bool verbose);
     
 private:
   // Data representation objects
   vector<IplImage*> orig_images;
-  vector<direction> directions;
+  vector<IplImage*> gray_images;
+  vector<IplImage*> annotated_images;
 
   // State of machine
   bool ran;				// whether differences have been calculated
-  char* machine_status;
+  char* where_flow_found;
   int num_tracked_points;
-  int flags;
+  int lk_flags;
 
   // Points to track
-  CvPoint2D32f* points[2], *swap_points;
+  CvPoint2D32f *prev_points, *curr_points, *swap_points;
+
+  // Pyramids
+  IplImage *prev_pyramid, *curr_pyramid, *swap_pyramid;
+
+  // Action Functions
+  void init(IplImage*);
+  void pair_flow(IplImage*,IplImage*);	// calculate the flow between two images
+  IplImage* annotate_img(IplImage*);
 };
 
 

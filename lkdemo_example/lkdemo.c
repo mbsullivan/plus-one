@@ -123,6 +123,8 @@ int main( int argc, char** argv )
         }
         else if( count > 0 )
         {
+	   
+printf("flags:%d\n",flags);
             cvCalcOpticalFlowPyrLK( prev_grey, grey, prev_pyramid, pyramid,
                 points[0], points[1], count, cvSize(win_size,win_size), 3, status, 0,
                 cvTermCriteria(CV_TERMCRIT_ITER|CV_TERMCRIT_EPS,20,0.03), flags );

@@ -30,7 +30,7 @@ int main(int argc, char *argv[]){
   int optchar;							// for option input
 
   // handle input flags
-  while((optchar = getopt(argc, argv, "i:f:s?o:")) != -1){	// read in arguments
+  while((optchar = getopt(argc, argv, "i:f:s?o:w")) != -1){	// read in arguments
     switch(optchar){
       case 'i':			// input directory
         input_directory = new string(optarg);
@@ -45,6 +45,9 @@ int main(int argc, char *argv[]){
       case 'o':
         output_directory = new string(optarg);
         break;
+      case 'w':
+        webcam = true;
+        break;
       default:                  // display syntax help
       case '?':
         return display_program_syntax();
@@ -54,56 +57,70 @@ int main(int argc, char *argv[]){
   // output title block, if applicable
   if(verbose) display_program_header();
 
-  // resolve path name and find directory
-  fs::path full_path(fs::initial_path<fs::path>());
-  full_path = fs::system_complete(fs::path(input_directory->c_str(), fs::native));
-  if(!fs::exists(full_path) || !fs::is_directory(full_path)){
-    cout << "[ERROR] Invalid input directory (" << full_path.native_directory_string() << ")!" << endl;
-    return INVALID_INPUT_DIRECTORY;
-  }
-
-  if(verbose){
-    cout << "  * " << "Finding *" << *file_format << " in " << full_path.native_directory_string() << endl;
+  // resolve output path name and find directory (for later)
+  fs::path out_path(fs::initial_path<fs::path>());
+  out_path = fs::system_complete(fs::path(output_directory->c_str(), fs::native));
+  if(!fs::exists(out_path) || !fs::is_directory(out_path)){
+    cout << "[ERROR] Invalid output directory (" << out_path.native_directory_string() << ")!" << endl;
+    return INVALID_OUTPUT_DIRECTORY;
   }
 
   // to store calculated flow information and intermediary data
   Calc_Flows *flows = new Calc_Flows();
 
-  // recurse through directory and handle all valid files
-  fs::directory_iterator end_iter;
-  for(fs::directory_iterator dir_itr(full_path); dir_itr != end_iter; ++dir_itr){
+  // resolve input path name and find directory
+  if(!webcam){
+    fs::path full_path(fs::initial_path<fs::path>());
+    full_path = fs::system_complete(fs::path(input_directory->c_str(), fs::native));
+    if(!fs::exists(full_path) || !fs::is_directory(full_path)){
+      cout << "[ERROR] Invalid input directory (" << full_path.native_directory_string() << ")!" << endl;
+      return INVALID_INPUT_DIRECTORY;
+    }
 
-    // make sure is regular (i.e. non-directory) file
-    if(fs::is_regular(dir_itr->status())){
+    if(verbose){
+      cout << "  * " << "Finding *" << *file_format << " in " << full_path.native_directory_string() << endl;
+    }
 
-      // make sure file extension is correct
-      string ext = fs::extension(dir_itr->leaf());
-      if(file_format->compare(ext) == 0){
-        if(verbose){
-          cout << "    * " << "Processing " << dir_itr->leaf() << "...";
-        }
+    // recurse through directory and handle all valid files
+    fs::directory_iterator end_iter;
+    for(fs::directory_iterator dir_itr(full_path); dir_itr != end_iter; ++dir_itr){
 
-        // parse file (for later processing)
-	fs::path target_file(full_path);
-        target_file /= dir_itr->leaf();
-        //bool added = flows->add(fs::system_complete(fs::path(dir_itr->leaf(), fs::native)).native_directory_string());
-        bool added = flows->add(target_file.native_directory_string());
+      // make sure is regular (i.e. non-directory) file
+      if(fs::is_regular(dir_itr->status())){
+
+        // make sure file extension is correct
+        string ext = fs::extension(dir_itr->leaf());
+        if(file_format->compare(ext) == 0){
+          if(verbose){
+            cout << "    * " << "Processing " << dir_itr->leaf() << "...";
+          }
+
+          // parse file (for later processing)
+	  fs::path target_file(full_path);
+          target_file /= dir_itr->leaf();
+          bool added = flows->add(target_file.native_directory_string());
 	
-        if(verbose){
-          cout << "\t\t\t\t";
-          if(added)
-            cout << "[OK]" << endl;
-          else
-            cout << "[FAIL]" << endl;
+          if(verbose){
+            cout << "\t\t\t\t";
+            if(added)
+              cout << "[OK]" << endl;
+            else
+              cout << "[FAIL]" << endl;
+          }
         }
       }
     }
+
+    // find optical flow for each pair of images
+    flows->run();
   }
-
-  // find optical flow for each pair of images
-  flows->run();
-  //flows->animate();
-
+  else{	// using webcam
+    flows->run_webcam(true);
+  }
+  
+  // output a video to the proper folder
+  flows->animate(out_path.native_directory_string());
+  
   return 0;
 }
 

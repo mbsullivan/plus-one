@@ -22,12 +22,13 @@ Calc_Flows::Calc_Flows(){
 
   // set up state of machine
   ran = false;  
-  machine_status = 0;
+  where_flow_found = NULL;
   num_tracked_points = 0;
-  flags = 0;
+  lk_flags = 0;
   // Points to track
-  points[0] = 0;
-  points[1] = 0;
+  prev_points = NULL;
+  curr_points = NULL;
+  swap_points = NULL;
 }
 
 Calc_Flows::~Calc_Flows(){
@@ -35,7 +36,12 @@ Calc_Flows::~Calc_Flows(){
   // release all images
   for(int i = 0; i < orig_images.size(); i++){
     cvReleaseImage(&orig_images[i]);
+    cvReleaseImage(&gray_images[i]);
+    cvReleaseImage(&annotated_images[i]);
   }
+  cvReleaseImage(&prev_pyramid);
+  cvReleaseImage(&curr_pyramid);
+  cvReleaseImage(&swap_pyramid);
 }
 
 // Access Functions
@@ -49,12 +55,19 @@ int Calc_Flows::get_size(){
 bool Calc_Flows::add(string filename){
   
   // load the image
-  IplImage *img = NULL;
-  img = cvLoadImage(filename.c_str(),0);  // scan in grayscale
+  IplImage *img = NULL, *gray = NULL;
+  img = cvLoadImage(filename.c_str(),1);  // scan in color
   if(!img) return false;
 
   // store the image
   orig_images.push_back(img);
+
+  // convert to grayscale
+  gray = cvCreateImage(cvGetSize(img), IPL_DEPTH_8U, 1);
+  cvCvtColor(img, gray, CV_BGR2GRAY);
+
+  // store the gray image
+  gray_images.push_back(gray);
 
   return true;
 }
@@ -62,6 +75,91 @@ bool Calc_Flows::add(string filename){
 int Calc_Flows::run(){
 // Default run function (with default verbosity)
   return run(DEFAULT_VERBOSITY);
+}
+
+void Calc_Flows::init(IplImage *initial_img){
+
+  // set up state of machine for new run
+  prev_points = (CvPoint2D32f*)cvAlloc(MAX_POINTS_TO_TRACK*sizeof(0));	// initially NULL
+  curr_points = (CvPoint2D32f*)cvAlloc(MAX_POINTS_TO_TRACK*sizeof(0));	// initially NULL
+  where_flow_found = (char*)cvAlloc(MAX_POINTS_TO_TRACK);		// initially NULL
+
+  // setup pyramids for flow
+  prev_pyramid = cvCreateImage(cvGetSize(initial_img), IPL_DEPTH_8U, 1);	// initially NULL
+  curr_pyramid = cvCreateImage(cvGetSize(initial_img), IPL_DEPTH_8U, 1);	// initially NULL
+
+  // get initial set for feature detection
+  IplImage* eig = cvCreateImage(cvGetSize(initial_img), 32, 1);
+  IplImage* temp = cvCreateImage(cvGetSize(initial_img), 32, 1);
+  double quality = 0.01;
+  double min_distance = 10;
+  num_tracked_points = MAX_POINTS_TO_TRACK;
+
+  // detect number of features to track
+  cvGoodFeaturesToTrack(initial_img, eig, temp, curr_points, &num_tracked_points, quality, min_distance, 0, 3, 0, 0.04 );
+  cvFindCornerSubPix(initial_img, curr_points, num_tracked_points, cvSize(WINDOW_SIZE,WINDOW_SIZE), cvSize(-1,-1), cvTermCriteria(CV_TERMCRIT_ITER|CV_TERMCRIT_EPS,20,0.03));
+
+  // release temporary images
+  cvReleaseImage(&eig);
+  cvReleaseImage(&temp);
+}
+
+int Calc_Flows::run_webcam(bool verbose){
+// capture input from webcam
+
+  CvCapture* capture = 0;
+  capture = cvCaptureFromCAM(0);  // capture from default device
+  if(!capture){
+    return -1;
+  }
+
+  cvNamedWindow("Webcam_Capture", 0 );
+
+  IplImage *image = NULL, *prev_grey = NULL, *grey = NULL;
+
+  for(;;){
+  
+    IplImage* frame = NULL;
+  
+    frame = cvQueryFrame(capture);
+    if( !frame )
+      break;
+
+    if(!image){	// initialize data structures the first time
+      image = cvCreateImage( cvGetSize(frame), 8, 3 );
+      image->origin = frame->origin;
+      grey = cvCreateImage( cvGetSize(frame), 8, 1 );
+
+      // acquire usable image, grayscale it
+      cvCopy(frame, image, 0);
+      cvCvtColor(image, grey, CV_BGR2GRAY);
+
+      init(grey);
+      prev_grey = cvCreateImage(cvGetSize(frame), 8, 1 );
+    }
+    else{ // update the reading
+      cvCopy(frame, image, 0);
+      cvCvtColor(image, grey, CV_BGR2GRAY);
+    }
+
+    // update pairs with flow information
+    pair_flow(prev_grey, grey);
+    
+    // prepare for next captured picture
+    CV_SWAP(prev_grey, grey, swap_pyramid);
+
+    // DEBUGGING OUTPUT
+    for(int i = 0; i < num_tracked_points; i++){
+      cvCircle(image, cvPointFrom32f(curr_points[i]), 3, CV_RGB(0,255,0), -1, 8,0);
+      cout << cvPointFrom32f(curr_points[i]).x << "  " << cvPointFrom32f(curr_points[i]).y << endl;
+    }
+
+    // display webcam output
+    cvShowImage("Webcam_Capture", image);
+    cvWaitKey(10);
+  }
+        
+  return 0;      
 }
 
 int Calc_Flows::run(bool verbose){
@@ -74,48 +172,30 @@ int Calc_Flows::run(bool verbose){
   if(verbose)
     cout << endl << "  * " << "Calculating optical flow for " << orig_images.size() - 1 << " pairs of images..." << endl;
 
-  // set up state of machine for new run
-  points[0] = (CvPoint2D32f*)cvAlloc(MAX_POINTS_TO_TRACK*sizeof(points[0][0]));
-  points[1] = (CvPoint2D32f*)cvAlloc(MAX_POINTS_TO_TRACK*sizeof(points[0][0]));
-  machine_status = (char*)cvAlloc(MAX_POINTS_TO_TRACK);
-  flags = 0;
-
   // used to store (grayscale) input images
   IplImage *img1 = NULL, *img2 = NULL, *disp_image = NULL;
 
   // initialize for first frame
-  img1 = cvCloneImage(orig_images[0]);
-  // used for feature detection
-  IplImage* eig = cvCreateImage(cvGetSize(img1), 32, 1);
-  IplImage* temp = cvCreateImage(cvGetSize(img1), 32, 1);
-  double quality = 0.01;
-  double min_distance = 10;
-  num_tracked_points = MAX_POINTS_TO_TRACK;
-  // detect number of features to track
-  cvGoodFeaturesToTrack(img1, eig, temp, points[1], &num_tracked_points, quality, min_distance, 0, 3, 0, 0.04 );
-  cvFindCornerSubPix(img1, points[1], num_tracked_points, cvSize(SIZE_OF_CORNER_NEIGHBORHOOD,SIZE_OF_CORNER_NEIGHBORHOOD), cvSize(-1,-1), cvTermCriteria(CV_TERMCRIT_ITER|CV_TERMCRIT_EPS,20,0.03));
-  // release temporary images
-  cvReleaseImage(&eig);
-  cvReleaseImage(&temp);
+  img1 = cvCreateImage(cvGetSize(gray_images[0]), 8, 1);
+  img1->origin = gray_images[0]->origin;
+  // acquire usable image, grayscale it
+  cvCopy(gray_images[0], img1, 0);
+  init(img1);
 
-  // write circles to image
-  disp_image = cvCloneImage(img1);
-  for(int i = 0; i < num_tracked_points; i++){
-    cvCircle(disp_image, cvPointFrom32f(points[1][i]), 3, CV_RGB(0,255,0), -1, 8,0);
+  // DEBUGGING OUTPUT
+  for(int j = 0; j < num_tracked_points; j++){
+    //cout << cvPointFrom32f(curr_points[j]).x << "  " << cvPointFrom32f(curr_points[j]).y << endl;
   }
 
-  // display image
-  cvNamedWindow("disp_image", CV_WINDOW_AUTOSIZE); 
-  cvShowImage("disp_image", disp_image);
-  cvWaitKey(0);
-  cvDestroyAllWindows();
-  return 0;  
-
+  // run flow algorithm on all remaining images
   for(int i = 0; i < orig_images.size() - 1; i++){
     
     // load images
-    img1 = cvCloneImage(orig_images[i]);
-    img2 = cvCloneImage(orig_images[i+1]);
+    if(i == 0)	// necessary?
+      img1 = cvCreateImage(cvGetSize(gray_images[i]), 8, 1);
+    else
+      img1 = cvCloneImage(gray_images[i]);
+    img2 = cvCloneImage(gray_images[i+1]);
     
     // check that images are consistent
     int height1,width1,channels1;			
@@ -137,81 +217,13 @@ int Calc_Flows::run(bool verbose){
       return IMAGE_CONSISTENCY_FAILED;
     }
 
-    // calculate flow
-    IplImage *lkvelX = NULL, *lkvelY = NULL; 	// used to store flow velocities (Lucas & Kanade)
-
-    // create images to store velocities in X and Y directions
-    lkvelX = cvCreateImage(cvGetSize(img1), IPL_DEPTH_32F, 1);
-    lkvelY = cvCreateImage(cvGetSize(img2), IPL_DEPTH_32F, 1);
-
+    // calculate flow between the two images (results modify private global variables)
     if(verbose)
       cout << "    * " << "Processing optical flow of image pair #" << i << "...";
+    pair_flow(img1, img2);
 
-    // calculate flow (Lucas & Kanade algorithm)
-    cvCalcOpticalFlowLK(img1, img2, cvSize(3, 3), lkvelX, lkvelY); 
-
-    // create magnitude/angle image maps for velocities 
-    IplImage *mag = NULL, *ang = NULL;	// holds magnitude, angle of each flow vector
-    mag = cvCreateImage(cvGetSize(img1), IPL_DEPTH_32F, 1);
-    ang = cvCreateImage(cvGetSize(img1), IPL_DEPTH_32F, 1);
-    cvCartToPolar(lkvelX, lkvelY, mag, ang);
-
-    // find edges of original image
-    //IplImage *mag_edges = NULL;
-    //mag_edges = cvCreateImage(cvGetSize(img1), IPL_DEPTH_8U, 1);
-    //cvCanny(img1, mag_edges, 3, 6, 3);  
-
-    // count angles
-    int left = 0, right = 0;
-    double sum_left_col = 0, sum_right_col = 0, ave_left_col = 0, ave_right_col = 0;
-    BwImageFloat angles(ang);
-    for(int r = 0; r < ang->height; r++){
-      for(int c = 0; c < ang->width; c++){
-        if(angles[r][c] > M_PI){	
-          left++;			// count leftward angles
-          sum_left_col += c;		// record leftward positions
-          //sum_sq_left_col += c*c;	// used for sample standard deviation
-        }
-        else{
-          right++;			// count rightward angles
-          sum_right_col += c;		// record rightward positions
-          //sum_sq_right_col += c*c;	// used for sample standard deviation
-        }
-      }
-    }
-    ave_left_col = sum_left_col / (ang->height*ang->width);		// average leftward column
-    ave_right_col = sum_right_col / (ang->height*ang->width);		// average rightward column
-
-    if(left < right && ave_left_col < ave_right_col){
-      directions.push_back(FORWARD);
-      //cout << "FORWARD" << endl;
-    }
-    else if(left > right && ave_left_col > ave_right_col){
-      directions.push_back(BACKWARD);
-      //cout << "BACKWARD" << endl;
-    }
-    else{
-      directions.push_back(UNDETERMINED);
-    }
-
-    // display edge magnitude data
-    //cvNamedWindow("edges", CV_WINDOW_AUTOSIZE); 
-    //cvShowImage("edges", mag_edges);
-    //cvNamedWindow("magnitudes", CV_WINDOW_AUTOSIZE); 
-    //cvShowImage("magnitudes", mag);
-    //cvNamedWindow("img", CV_WINDOW_AUTOSIZE); 
-    //cvShowImage("img", img2);
-    //cvWaitKey(0);
-    //cvDestroyAllWindows();
-
-    // release the images
-    cvReleaseImage(&lkvelX);
-    cvReleaseImage(&lkvelY);
-    cvReleaseImage(&mag);
-    cvReleaseImage(&ang);
-    cvReleaseImage(&img1);
-    cvReleaseImage(&img2);
-    //cvReleaseImage(&mag_edges);
+    // annotate resulting image
+    annotated_images.push_back(annotate_img(orig_images[i+1]));	// animate colored second pair
 
     if(verbose)
       cout << "\t\t\t\t[OK]" << endl;
@@ -223,44 +235,48 @@ int Calc_Flows::run(bool verbose){
   return 0;
 }
 
-void Calc_Flows::animate(){
+void Calc_Flows::pair_flow(IplImage* img1, IplImage* img2){
+  // calculate flow and track points (modified Lucas & Kanade algorithm)
 
+  cvCalcOpticalFlowPyrLK(img1, img2, prev_pyramid, curr_pyramid, prev_points, curr_points, num_tracked_points, cvSize(WINDOW_SIZE,WINDOW_SIZE), 3, where_flow_found, 0, cvTermCriteria(CV_TERMCRIT_ITER|CV_TERMCRIT_EPS,2000,0.03), lk_flags);
+
+  lk_flags |= CV_LKFLOW_PYR_A_READY; // A pyramid will be ready > 1st time
+
+  // DEBUGGING OUTPUT
+  for(int j = 0; j < num_tracked_points; j++){
+    cout << cvPointFrom32f(curr_points[j]).x << "  " << cvPointFrom32f(curr_points[j]).y << endl;
+  }
+
+  // update points
+  CV_SWAP(prev_pyramid, curr_pyramid, swap_pyramid);
+  CV_SWAP(prev_points, curr_points, swap_points);
+}
+
+void Calc_Flows::animate(string outfolder){
+// Default animate function (with default verbosity)
+  return animate(outfolder, DEFAULT_VERBOSITY);
+}
+
+void Calc_Flows::animate(string outfolder, bool verbose){
+
+  // make sure state of machine is ready for animation
   if(!ran){
     cout << "  * " << "Optical flow processing has not been performed!" << endl;
     return;
   }
+  else if(annotated_images.size() != orig_images.size() - 1){
+    cout << "  * " << "Not all images have been annotated!" << endl;
+    return;
+  }
 
-  direction prev_direction = UNDETERMINED;
+ if(verbose)
+    cout << endl << "  * " << "Outputing animation for " << orig_images.size() - 1 << " pairs of images..." << endl;
 
   for(int i = 0; i < orig_images.size() - 1; i++){
+
+    if(verbose)
+      cout << "    * " << "Animating image pair #" << i << "...";
     
-    // load image
-    IplImage *img = NULL;
-    //img = orig_images[i+1];
-    img = cvCloneImage(orig_images[i+1]);
-
-    // add text
-    CvFont font;
-    double hScale=1.0;
-    double vScale=1.0;
-    int    lineWidth=1;
-    cvInitFont(&font,CV_FONT_HERSHEY_TRIPLEX, hScale,vScale,0,lineWidth);
-    
-    if(directions[i] == FORWARD)
-      cvPutText (img,"FORWARD",cvPoint(200,420), &font, cvScalar(255,255,0));
-    else if(directions[i] == BACKWARD)
-      cvPutText (img,"BACKWARD",cvPoint(200,420), &font, cvScalar(255,255,0));
-    else if(directions[i] == UNDETERMINED){
-      if(prev_direction == FORWARD)
-        cvPutText (img,"FORWARD",cvPoint(200,420), &font, cvScalar(255,255,0));
-      else if(prev_direction == BACKWARD)
-        cvPutText (img,"BACKWARD",cvPoint(200,420), &font, cvScalar(255,255,0));
-      else
-        cvPutText (img,"UNDETERMINED",cvPoint(200,420), &font, cvScalar(255,255,0));
-    }
-
-    prev_direction = directions[i];
-
     // output images
     stringstream ostream;
     string outfile;
@@ -268,8 +284,21 @@ void Calc_Flows::animate(){
     outfile = ostream.str();
     if(i < 10) outfile = "0" + outfile;
     if(i < 100) outfile = "0" + outfile;
-    outfile = "out/" + outfile;
+    outfile = outfolder + outfile;
 
-    cvSaveImage(outfile.c_str(),img);      // add the frame to a file   
+    cvSaveImage(outfile.c_str(),annotated_images[i]);      // add the frame to a file   
+
+    if(verbose)
+      cout << "\t\t\t\t[OK]" << endl;
   }
+}
+
+IplImage* Calc_Flows::annotate_img(IplImage* img){
+
+  // add circles for each tracked point
+  for(int i = 0; i < num_tracked_points; i++)
+    cvCircle(img, cvPointFrom32f(curr_points[i]), 3, CV_RGB(0,255,0), -1, 8,0);
+
+  // return annotated image
+  return img;
 }
